@@ -2,3 +2,6 @@
 
 # Outils de packaging (non requis pour executer l'application en mode source)
 pyinstaller>=6.0
+
+# Tests
+pytest>=7.0
