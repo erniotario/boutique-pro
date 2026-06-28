@@ -1,8 +1,6 @@
 """Ecran de vente (mode caisse)."""
 from __future__ import annotations
 
-import datetime
-
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -20,12 +18,11 @@ from PySide6.QtWidgets import (
 
 from boutiquepro.models import (
     Client,
-    LigneVente,
     ModePaiement,
     ProductStock,
     Produit,
-    Vente,
 )
+from boutiquepro.services import valider_vente
 
 
 class VentesScreen(QWidget):
@@ -210,67 +207,18 @@ class VentesScreen(QWidget):
 
     def _validate_sale(self):
         active_id = self.get_active_boutique_id()
-        if active_id is None:
-            QMessageBox.warning(
-                self, "Erreur", "Selectionnez une boutique specifique pour faire une vente."
-            )
-            return
-        if not self.lignes:
-            QMessageBox.warning(self, "Erreur", "Le panier est vide.")
-            return
-
         mode_paiement = self.payment_combo.currentData()
         client_id = self.client_combo.currentData()
-        if mode_paiement == ModePaiement.CREDIT and not client_id:
-            QMessageBox.warning(
-                self, "Erreur", "Un client est obligatoire pour une vente a credit."
-            )
-            return
 
         with self.session_factory() as session:
-            # Verify stock availability
-            for ligne in self.lignes:
-                stock = (
-                    session.query(ProductStock)
-                    .filter_by(produit_id=ligne["produit_id"], boutique_id=active_id)
-                    .first()
+            try:
+                vente = valider_vente(
+                    session, active_id, self.lignes, mode_paiement, client_id
                 )
-                dispo = stock.quantite if stock else 0.0
-                if dispo < ligne["quantite"]:
-                    QMessageBox.warning(
-                        self,
-                        "Stock insuffisant",
-                        f"Stock insuffisant pour {ligne['nom']} (disponible: {dispo:g}).",
-                    )
-                    return
-
-            total = sum(l["quantite"] * l["prix_unitaire"] for l in self.lignes)
-            vente = Vente(
-                boutique_id=active_id,
-                client_id=client_id,
-                date=datetime.datetime.now(),
-                mode_paiement=mode_paiement,
-                total=total,
-            )
-            session.add(vente)
-            session.flush()
-
-            for ligne in self.lignes:
-                lv = LigneVente(
-                    vente_id=vente.id,
-                    produit_id=ligne["produit_id"],
-                    quantite=ligne["quantite"],
-                    prix_unitaire=ligne["prix_unitaire"],
-                )
-                session.add(lv)
-                stock = (
-                    session.query(ProductStock)
-                    .filter_by(produit_id=ligne["produit_id"], boutique_id=active_id)
-                    .first()
-                )
-                stock.quantite -= ligne["quantite"]
-
-            session.commit()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Erreur", str(exc))
+                return
+            total = vente.total
 
         QMessageBox.information(self, "Vente validee", f"Vente enregistree. Total: {total:.0f} FCFA")
         self.lignes = []

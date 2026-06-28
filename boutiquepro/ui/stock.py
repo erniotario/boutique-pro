@@ -1,8 +1,6 @@
 """Ecran de gestion du stock par boutique, avec mouvements."""
 from __future__ import annotations
 
-import datetime
-
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -23,11 +21,11 @@ from PySide6.QtWidgets import (
 
 from boutiquepro.models import (
     Boutique,
-    MouvementStock,
     ProductStock,
     Produit,
     TypeMouvement,
 )
+from boutiquepro.services import valider_mouvement_stock
 
 
 class MouvementDialog(QDialog):
@@ -135,56 +133,23 @@ class StockScreen(QWidget):
         if dialog.exec() != QDialog.Accepted:
             return
         values = dialog.get_values()
-        if not values["produit_id"] or not values["boutique_id"]:
-            QMessageBox.warning(self, "Erreur", "Produit et boutique sont obligatoires.")
-            return
-        if values["quantite"] <= 0:
-            QMessageBox.warning(self, "Erreur", "La quantite doit etre superieure a zero.")
-            return
 
         with self.session_factory() as session:
-            mvt = MouvementStock(
-                type=values["type"],
-                produit_id=values["produit_id"],
-                boutique_id=values["boutique_id"],
-                boutique_destination_id=values["boutique_destination_id"],
-                quantite=values["quantite"],
-                prix_achat=values["prix_achat"],
-                fournisseur=values["fournisseur"],
-                notes=values["notes"],
-                date=datetime.datetime.now(),
-            )
-            session.add(mvt)
-
-            def get_or_create_stock(produit_id, boutique_id):
-                stock = (
-                    session.query(ProductStock)
-                    .filter_by(produit_id=produit_id, boutique_id=boutique_id)
-                    .first()
+            try:
+                valider_mouvement_stock(
+                    session,
+                    type_mouvement=values["type"],
+                    produit_id=values["produit_id"],
+                    boutique_id=values["boutique_id"],
+                    quantite=values["quantite"],
+                    prix_achat=values["prix_achat"],
+                    boutique_destination_id=values["boutique_destination_id"],
+                    fournisseur=values["fournisseur"],
+                    notes=values["notes"],
                 )
-                if stock is None:
-                    stock = ProductStock(produit_id=produit_id, boutique_id=boutique_id, quantite=0.0)
-                    session.add(stock)
-                return stock
-
-            stock = get_or_create_stock(values["produit_id"], values["boutique_id"])
-
-            if values["type"] == TypeMouvement.ENTREE:
-                stock.quantite += values["quantite"]
-                if values["prix_achat"]:
-                    produit = session.get(Produit, values["produit_id"])
-                    if produit:
-                        produit.prix_achat = values["prix_achat"]
-            elif values["type"] in (TypeMouvement.SORTIE, TypeMouvement.PERTE):
-                stock.quantite -= values["quantite"]
-            elif values["type"] == TypeMouvement.TRANSFERT:
-                stock.quantite -= values["quantite"]
-                dest_stock = get_or_create_stock(
-                    values["produit_id"], values["boutique_destination_id"]
-                )
-                dest_stock.quantite += values["quantite"]
-
-            session.commit()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Erreur", str(exc))
+                return
 
         self.refresh()
         if self.on_change:

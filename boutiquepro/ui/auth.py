@@ -18,10 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from boutiquepro.models import Boutique, RoleUtilisateur, Utilisateur
-
-
-def _pin_is_valid(pin: str) -> bool:
-    return pin.isdigit() and 4 <= len(pin) <= 6
+from boutiquepro.services import pin_is_valid as _pin_is_valid
 
 
 class PremierUtilisateurDialog(QDialog):
