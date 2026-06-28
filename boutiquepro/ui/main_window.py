@@ -8,12 +8,14 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenuBar,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from boutiquepro.models import Boutique
+from boutiquepro.models import Boutique, RoleUtilisateur, Utilisateur
+from boutiquepro.ui.auth import UtilisateursDialog
 from boutiquepro.ui.boutiques import BoutiquesScreen
 from boutiquepro.ui.clients import ClientsScreen
 from boutiquepro.ui.dashboard import DashboardScreen
@@ -26,11 +28,14 @@ TOUTES_BOUTIQUES = "__toutes__"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, session_factory):
+    def __init__(self, session_factory, utilisateur: Utilisateur | None = None):
         super().__init__()
         self.session_factory = session_factory
+        self.utilisateur = utilisateur
         self.setWindowTitle("BoutiquePro - Gestion de boutiques")
         self.resize(1280, 800)
+
+        self._build_menu()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -94,6 +99,23 @@ class MainWindow(QMainWindow):
         self.nav_list.setCurrentRow(0)
         self._refresh_boutique_combo()
 
+    def _build_menu(self):
+        menu_bar: QMenuBar = self.menuBar()
+        admin_menu = menu_bar.addMenu("Administration")
+        self.utilisateurs_action = admin_menu.addAction("Gestion des utilisateurs")
+        self.utilisateurs_action.triggered.connect(self._open_utilisateurs_dialog)
+        # Seul le proprietaire peut gerer les comptes utilisateurs.
+        if self.utilisateur is not None and self.utilisateur.role != RoleUtilisateur.PROPRIETAIRE:
+            self.utilisateurs_action.setEnabled(False)
+
+    def _open_utilisateurs_dialog(self):
+        dialog = UtilisateursDialog(self.session_factory, parent=self)
+        dialog.exec()
+        self._refresh_boutique_combo()
+
+    def _is_gerant(self) -> bool:
+        return self.utilisateur is not None and self.utilisateur.role == RoleUtilisateur.GERANT
+
     def get_active_boutique_id(self):
         data = self.boutique_combo.currentData()
         if data == TOUTES_BOUTIQUES or data is None:
@@ -104,14 +126,23 @@ class MainWindow(QMainWindow):
         current = self.boutique_combo.currentData()
         self.boutique_combo.blockSignals(True)
         self.boutique_combo.clear()
-        self.boutique_combo.addItem("Toutes boutiques", TOUTES_BOUTIQUES)
-        with self.session_factory() as session:
-            for b in session.query(Boutique).order_by(Boutique.nom).all():
-                self.boutique_combo.addItem(b.nom, b.id)
-        if current is not None:
-            idx = self.boutique_combo.findData(current)
-            if idx >= 0:
-                self.boutique_combo.setCurrentIndex(idx)
+        if self._is_gerant():
+            # Un gerant est rattache a une seule boutique : pas de "Toutes
+            # boutiques", pas de changement possible.
+            with self.session_factory() as session:
+                boutique = session.get(Boutique, self.utilisateur.boutique_id)
+                if boutique is not None:
+                    self.boutique_combo.addItem(boutique.nom, boutique.id)
+            self.boutique_combo.setEnabled(False)
+        else:
+            self.boutique_combo.addItem("Toutes boutiques", TOUTES_BOUTIQUES)
+            with self.session_factory() as session:
+                for b in session.query(Boutique).order_by(Boutique.nom).all():
+                    self.boutique_combo.addItem(b.nom, b.id)
+            if current is not None:
+                idx = self.boutique_combo.findData(current)
+                if idx >= 0:
+                    self.boutique_combo.setCurrentIndex(idx)
         self.boutique_combo.blockSignals(False)
 
     def _on_nav_changed(self, row):

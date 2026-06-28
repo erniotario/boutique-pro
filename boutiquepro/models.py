@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime
 import enum
+import hashlib
+import secrets
 
 from sqlalchemy import (
     Boolean,
@@ -32,6 +34,11 @@ class ModePaiement(str, enum.Enum):
     COMPTANT = "comptant"
     MOBILE_MONEY = "mobile_money"
     CREDIT = "credit"
+
+
+class RoleUtilisateur(str, enum.Enum):
+    PROPRIETAIRE = "proprietaire"
+    GERANT = "gerant"
 
 
 class Boutique(Base):
@@ -235,3 +242,49 @@ class Remboursement(Base):
 
     def __repr__(self) -> str:
         return f"<Remboursement client={self.client_id} montant={self.montant}>"
+
+
+class Utilisateur(Base):
+    """Compte utilisateur pour la connexion par PIN (cahier des charges 3.8).
+
+    Authentification volontairement simple : pas de systeme complexe, pas de
+    jetons de session, pas de regles de complexite au-dela de la longueur du
+    PIN, pas de verrouillage/anti-bruteforce.
+    """
+
+    __tablename__ = "utilisateurs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nom: Mapped[str] = mapped_column(String(120), nullable=False)
+    pin_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    pin_salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[RoleUtilisateur] = mapped_column(
+        Enum(RoleUtilisateur), nullable=False, default=RoleUtilisateur.GERANT
+    )
+    boutique_id: Mapped[int | None] = mapped_column(
+        ForeignKey("boutiques.id"), nullable=True
+    )
+
+    boutique: Mapped["Boutique | None"] = relationship(
+        "Boutique", foreign_keys=[boutique_id]
+    )
+
+    @staticmethod
+    def hash_pin(pin: str, salt: str | None = None) -> tuple[str, str]:
+        """Calcule un hash sale du PIN. Retourne (pin_hash, salt)."""
+        if salt is None:
+            salt = secrets.token_hex(16)
+        digest = hashlib.sha256((salt + pin).encode("utf-8")).hexdigest()
+        return digest, salt
+
+    def set_pin(self, pin: str) -> None:
+        """Definit/remplace le PIN de l'utilisateur (stocke uniquement le hash sale)."""
+        self.pin_hash, self.pin_salt = self.hash_pin(pin)
+
+    def verify_pin(self, pin: str) -> bool:
+        """Verifie un PIN par rapport au hash stocke."""
+        candidate, _ = self.hash_pin(pin, self.pin_salt)
+        return secrets.compare_digest(candidate, self.pin_hash)
+
+    def __repr__(self) -> str:
+        return f"<Utilisateur {self.nom} role={self.role}>"
